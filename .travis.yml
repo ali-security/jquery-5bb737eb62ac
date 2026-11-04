@@ -1,3 +1,124 @@
 language: node_js
-node_js:
-- '0.10'
+os: linux
+dist: focal
+
+# Seal fork CI. Every leg is listed explicitly under jobs.include (a
+# top-level node_js list would be replaced by it anyway).
+#  - Node 0.10 / 0.12: the project's own `npm test` (= grunt default: jsonlint,
+#    build, jshint, jscs, uglify, dist, compare_size, node-smoke-test on jsdom).
+#  - Browser: the real QUnit unit suite (test/index.html, PHP ajax fixtures)
+#    against a freshly built dist/jquery.js in headless Chrome.
+
+# Travis archives job logs minutes behind the job; keep each job open until
+# its own archived log holds its results (see test/seal-wait-for-log.sh).
+after_script:
+  - sh test/seal-wait-for-log.sh
+
+jobs:
+  include:
+    - name: "npm test (grunt) - Node 0.10"
+      node_js: "0.10"
+      addons:
+        apt:
+          packages:
+            # node-gyp of npm 2 needs Python 2 (jsdom -> contextify native addon)
+            - python2
+      before_install: &npm2_setup
+        # build/tasks/build.js appends $COMMIT to the embedded version
+        - unset COMMIT
+        # Reproducible build stamp: pin @DATE to the 2.1.4 release build time
+        - >-
+          sed -i '/@DATE/s|( new Date() )\.toISOString()\.replace( /:[^,]*, "Z" )|"2015-04-28T16:01Z"|'
+          build/tasks/build.js
+        - grep -n '"2015-04-28T16:01Z"' build/tasks/build.js
+        # jQuery's devDependencies as of the 2.1.4 release (2015-04-28)
+        - npm config set registry https://time-machines-npm.sealsecurity.io/
+        - npm config set //time-machines-npm.sealsecurity.io/:_authToken 2015-04-28T16:17:13.648000Z
+        # npm 2 only sends the token when always-auth is on
+        - npm config set always-auth true
+        - npm config set python python2
+        - node --version
+        - npm --version
+      install:
+        - npm install
+      script:
+        - unset COMMIT
+        - npm test
+        - >-
+          grep -q ' \* Date: 2015-04-28T16:01Z' dist/jquery.js
+
+    - name: "npm test (grunt) - Node 0.12"
+      node_js: "0.12"
+      addons:
+        apt:
+          packages:
+            - python2
+      before_install: *npm2_setup
+      install:
+        - npm install
+      script:
+        - unset COMMIT
+        - npm test
+        - >-
+          grep -q ' \* Date: 2015-04-28T16:01Z' dist/jquery.js
+
+    - name: "QUnit suite - headless Chrome"
+      node_js: "20"
+      # noble for PHP 8.3: the built-in server of focal's PHP 7.4 and jammy's
+      # PHP 8.1.2 stalls under headless Chrome (requests sit unaccepted for
+      # ~60s), so the page never loads / the ajax module times out.
+      dist: noble
+      addons:
+        chrome: stable
+        apt:
+          packages:
+            - php-cli
+      before_install:
+        - /usr/bin/php --version
+        - google-chrome --version
+      install:
+        # Build dist/ with the project's own toolchain (grunt on Node 0.12 / npm 2).
+        # Lint and the jsdom node smoke test run on the Node 0.10/0.12 legs; the
+        # install scripts are skipped here (contextify's node-gyp needs Python 2,
+        # which noble does not ship).
+        - unset COMMIT
+        - >-
+          sed -i '/@DATE/s|( new Date() )\.toISOString()\.replace( /:[^,]*, "Z" )|"2015-04-28T16:01Z"|'
+          build/tasks/build.js
+        - grep -n '"2015-04-28T16:01Z"' build/tasks/build.js
+        - nvm install 0.12
+        - nvm use 0.12
+        - npm config set registry https://time-machines-npm.sealsecurity.io/
+        - npm config set //time-machines-npm.sealsecurity.io/:_authToken 2015-04-28T16:17:13.648000Z
+        - npm config set always-auth true
+        - npm install --ignore-scripts
+        - ./node_modules/.bin/grunt 'build:*:*' uglify 'dist:*'
+        - >-
+          grep -q ' \* Date: 2015-04-28T16:01Z' dist/jquery.js
+        # Test driver on a current Node, from the public registry
+        - nvm use 20
+        - node --version
+        - mkdir -p /tmp/driver
+        - cd /tmp/driver && npm init -y && npm install --registry=https://registry.npmjs.org/ puppeteer-core@22
+        - cd "$TRAVIS_BUILD_DIR"
+      before_script:
+        # Multiple workers are load-bearing: single-process php -S starves
+        # the fixture iframes the suite opens.
+        - PHP_CLI_SERVER_WORKERS=10 /usr/bin/php -S 127.0.0.1:8000 -t . > /tmp/php.log 2>&1 &
+        - >-
+          for i in $(seq 1 30); do
+          curl -sf -o /dev/null http://127.0.0.1:8000/test/index.html && break;
+          sleep 1;
+          done
+        - curl -sf -o /dev/null http://127.0.0.1:8000/test/index.html
+      script:
+        # Environment-dependent in current headless Chrome (not jQuery bugs):
+        #  - ajax #14379: Chrome refuses network requests issued from an unload
+        #    handler (sync XHR during page dismissal is disallowed), so the
+        #    data/ajax/onunload.html fixture reports "error" instead of "success".
+        #  - offset fractions: Blink snaps layout positions to 1/64 px, so the
+        #    position set via .offset() reads back as 999.984375, not 1000.
+        - >-
+          SEAL_SKIP_TESTS="ajax: #14379 - jQuery.ajax() on unload => environment-dependent: headless Chrome refuses requests issued from an unload handler, so the onunload.html fixture reports error instead of success||offset: fractions (see #7730 and #7885) => environment-dependent: Blink snaps layout positions to 1/64 px, so the offset set to 1000 reads back as 999.984375"
+          NODE_PATH=/tmp/driver/node_modules
+          node test/seal-browser-runner.js "http://127.0.0.1:8000/test/index.html?dev"

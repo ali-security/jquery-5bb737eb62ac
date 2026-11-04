@@ -1,0 +1,82 @@
+name: seal-build
+
+# Build-and-pack only. The project's tests (grunt lint + node smoke test on
+# Node 0.10/0.12, and the QUnit suite in headless Chrome) run on Travis CI,
+# see .travis.yml.
+on:
+  workflow_dispatch:
+
+jobs:
+  build-pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Write container build script
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/seal"
+          cat > "$RUNNER_TEMP/seal/build.sh" <<'SEAL_BUILD_EOF'
+          set -euo pipefail
+          node --version
+          npm --version
+          # jQuery's devDependencies as of the 2.1.4 release (2015-04-28)
+          npm config set registry https://time-machines-npm.sealsecurity.io/
+          npm config set //time-machines-npm.sealsecurity.io/:_authToken 2015-04-28T16:17:13.648000Z
+          # npm 2 only sends the token when always-auth is on
+          npm config set always-auth true
+          # build/tasks/build.js appends $COMMIT to the embedded version
+          unset COMMIT
+          # Reproducible build stamp: pin @DATE to the 2.1.4 release build time
+          sed -i '/@DATE/s|( new Date() )\.toISOString()\.replace( /:[^,]*, "Z" )|"2015-04-28T16:01Z"|' build/tasks/build.js
+          grep -n '"2015-04-28T16:01Z"' build/tasks/build.js
+          npm install --ignore-scripts
+          # Regenerate dist/ from src/ (the part of `grunt` default that writes dist/)
+          ./node_modules/.bin/grunt 'build:*:*' uglify 'dist:*'
+          ls -la dist
+          grep -q ' \* Date: 2015-04-28T16:01Z' dist/jquery.js
+          head -c 120 dist/jquery.min.js
+          echo
+          # Pack from a scratch copy without CI-only files and installed deps
+          rm -rf /tmp/pkg
+          mkdir -p /tmp/pkg
+          tar -C /work --exclude=./node_modules --exclude=./.github --exclude=./.git --exclude=./seal-out -cf - . | tar -C /tmp/pkg -xf -
+          # Upstream packed on macOS: every tarball entry is uid/gid 501/20
+          chown -R 501:20 /tmp/pkg
+          cd /tmp/pkg
+          npm pack
+          mkdir -p /work/seal-out
+          cp jquery-2.1.4.tgz /work/seal-out/
+          tar tzvf /work/seal-out/jquery-2.1.4.tgz
+          echo "member count: $(tar tzf /work/seal-out/jquery-2.1.4.tgz | wc -l)"
+          chown -R "$HOST_UID:$HOST_GID" /work
+          SEAL_BUILD_EOF
+          chmod +x "$RUNNER_TEMP/seal/build.sh"
+
+      - name: Build and pack (node 0.12 / npm 2)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOST_UID="$(id -u)"
+          export HOST_GID="$(id -g)"
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -v "$RUNNER_TEMP/seal:/seal" \
+            -w /work \
+            -e HOST_UID -e HOST_GID \
+            node:0.12 bash /seal/build.sh
+          if ! grep -q ' \* Date: 2015-04-28T16:01Z' dist/jquery.js; then
+            echo "dist/jquery.js is missing the pinned build date"
+            exit 1
+          fi
+          ls -la seal-out
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jquery-npm
+          path: seal-out/jquery-2.1.4.tgz
+          if-no-files-found: error
