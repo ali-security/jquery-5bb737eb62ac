@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+	<title>Cross-domain js is not executed without an explicit dataType (gh-2432)</title>
+	<script>
+		// The jQuery copy under test: "?copy=sizzle" loads the jQuery 1.9.1 that ships
+		// as the Sizzle test fixture (src/sizzle/test/jquery.js), otherwise the build
+		document.write( "<script src='" +
+			( /[?&]copy=sizzle(?:&|$)/.test( location.search ) ?
+				"../../../src/sizzle/test/jquery.js" :
+				"../../jquery.js" ) +
+			"'><\/script>" );
+	</script>
+</head>
+<body>
+	<script>
+		// Fake transport answering every request with a javascript response,
+		// so no real (cross-domain) server is needed
+		var contentType;
+
+		jQuery.ajaxSetup({
+			async: false,
+			global: false,
+			xhr: function() {
+				var xhr = {
+					readyState: 0,
+					status: 0,
+					statusText: "",
+					open: function() {},
+					setRequestHeader: function() {},
+					abort: function() {},
+					getAllResponseHeaders: function() {
+						return "Content-Type: " + contentType + "\r\n";
+					},
+					getResponseHeader: function( name ) {
+						return name.toLowerCase() === "content-type" ? contentType : null;
+					},
+					send: function() {
+						xhr.readyState = 4;
+						xhr.status = 200;
+						xhr.statusText = "OK";
+						xhr.responseText = "window.crossDomainScriptExecuted = true;";
+						if ( xhr.onload ) {
+							xhr.onload();
+						}
+					}
+				};
+				return xhr;
+			}
+		});
+
+		function executes( type, request ) {
+			contentType = type;
+			window.crossDomainScriptExecuted = false;
+			request();
+			return window.crossDomainScriptExecuted;
+		}
+
+		window.parent.iframeCallback( jQuery.fn.jquery, {
+			crossDomain: executes( "text/javascript", function() {
+				jQuery.ajax({ url: "http://example.invalid/script.js" });
+			}),
+			crossDomainEcmascript: executes( "application/ecmascript", function() {
+				jQuery.ajax( "http://example.invalid/script.js" );
+			}),
+			crossDomainProtocolLess: executes( "application/javascript", function() {
+				jQuery.ajax({ url: "//example.invalid/script.js" });
+			}),
+			crossDomainGet: executes( "text/javascript", function() {
+				jQuery.get( "http://example.invalid/script.js" );
+			}),
+			crossDomainPost: executes( "text/javascript", function() {
+				jQuery.post( "http://example.invalid/script.js" );
+			}),
+			crossDomainOption: executes( "text/javascript", function() {
+				jQuery.ajax({ url: "script.js", crossDomain: true });
+			}),
+			sameDomain: executes( "text/javascript", function() {
+				jQuery.ajax({ url: "script.js" });
+			}),
+			sameDomainAbsolute: executes( "text/javascript", function() {
+				jQuery.ajax({ url: location.protocol + "//" + location.host + "/script.js" });
+			}),
+			dataTypeScript: executes( "text/javascript", function() {
+				jQuery.ajax({ url: "script.js", dataType: "script" });
+			})
+		});
+	</script>
+</body>
+</html>
