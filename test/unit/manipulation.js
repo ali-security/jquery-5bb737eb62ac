@@ -2430,3 +2430,100 @@ test( "Validate creation of multiple quantities of certain elements (#13818)", 4
 		});
 	});
 });
+
+test( "<option> markup is parsed in the same context as by the browser (gh-4647)", function() {
+	var i, nodes,
+		div = document.createElement( "div" ),
+		inputs = [
+			"<option>option</option></select><b>sibling</b>",
+			"<optgroup label='group'><option>option</option></optgroup></select><i>sibling</i>",
+			"<option><style></option></select><b>escaped</b></style>"
+		];
+
+	// Support: IE9
+	// IE9 replaces <option> tags with their contents when inserted outside of
+	// the select element, so the select wrapper is still required there.
+	div.innerHTML = "<option></option>";
+	if ( !div.lastChild ) {
+		expect( 1 );
+		ok( true, "<option> cannot be parsed outside of a select element in this browser" );
+		return;
+	}
+
+	expect( inputs.length + 9 );
+
+	// A "</select>" in the input must not be able to close a select wrapper
+	// added by jQuery, making the markup parse differently than it would by
+	// the browser (and by an HTML sanitizer) in a regular element context
+	for ( i = 0; i < inputs.length; i++ ) {
+		div.innerHTML = inputs[ i ];
+		equal( jQuery( "<div/>" ).append( jQuery.parseHTML( inputs[ i ] ) ).html(), div.innerHTML,
+			"Parsed the same as by the browser: " + inputs[ i ] );
+	}
+
+	nodes = jQuery.parseHTML( inputs[ 0 ] );
+	equal( nodes.length, 2, "Both top-level nodes are created" );
+	ok( jQuery.nodeName( nodes[ 0 ], "option" ), "<option> is created" );
+	ok( jQuery.nodeName( nodes[ 1 ], "b" ), "Markup after </select> stays a sibling" );
+
+	equal( jQuery( "<div/>" ).html( inputs[ 0 ] ).children().length, 2,
+		"html(): markup after </select> stays a sibling" );
+	equal( jQuery( "<div/>" ).append( inputs[ 1 ] ).children().length, 2,
+		"append(): markup after </select> stays a sibling" );
+
+	nodes = jQuery( "<option value='opt'>option</option>" );
+	ok( jQuery.nodeName( nodes[ 0 ], "option" ), "<option> with content is created" );
+	equal( nodes.val(), "opt", "<option> attributes are kept" );
+
+	nodes = jQuery( "<optgroup label='group'><option>option</option></optgroup>" );
+	ok( jQuery.nodeName( nodes[ 0 ], "optgroup" ), "<optgroup> with content is created" );
+	equal( nodes.children( "option" ).text(), "option", "<optgroup> children are kept" );
+});
+
+asyncTest( "Sanitized HTML with <option> doesn't get unsanitized (gh-4647)", 1, function() {
+	var executed = [],
+		container = jQuery( "<div/>" ).appendTo( "#qunit-fixture" );
+
+	Globals.register( "xss" );
+	window.xss = function( i ) {
+		executed.push( i );
+	};
+
+	// Thanks to Masato Kinugawa from Cure53 for the original test case
+	container.html( "<option><style></option></select><img src=url404 onerror=xss(0)></style>" );
+	container.append( "<optgroup><style></optgroup></select><img src=url404 onerror=xss(1)></style>" );
+	jQuery( "<option><style></option></select><img src=url404 onerror=xss(2)></style>" );
+	jQuery.parseHTML( "<option><style></option></select><img src=url404 onerror=xss(3)></style>" );
+
+	setTimeout(function() {
+		deepEqual( executed, [], "Insecure code wasn't executed" );
+		start();
+	}, 1000 );
+});
+
+testIframeWithCallback( "<option>/<optgroup> HTML isn't parsed inside a <select> wrapper - bundled jQuery 1.9.1 (src/sizzle/test/jquery.js) (gh-4647)", "manipulation/optionWrapBundled.html", function( result ) {
+	expect( 10 );
+
+	strictEqual( result.version, "1.9.1", "src/sizzle/test/jquery.js is jQuery 1.9.1" );
+	strictEqual( result.hasParseHTML, true, "1.9.1 has jQuery.parseHTML" );
+	strictEqual( result.supportOption, result.optionParses,
+		"jQuery.support.option tells whether a bare <option> parses outside a <select>" );
+
+	// Support: IE9
+	// The select wrapper is still required where a bare <option> doesn't parse.
+	if ( result.optionParses ) {
+		strictEqual( result.jQueryNodes, "option,b", "jQuery(): option and its sibling are both created" );
+		strictEqual( result.htmlChildren, "option,b", "html(): option and its sibling are both created" );
+		strictEqual( result.appendChildren, "optgroup,b", "append(): optgroup and its sibling are both created" );
+		strictEqual( result.parseHTMLNodes, "optgroup,b", "jQuery.parseHTML(): optgroup and its sibling are both created" );
+	} else {
+		ok( true, "<option> needs a <select> wrapper in this browser" );
+		ok( true, "<option> needs a <select> wrapper in this browser" );
+		ok( true, "<option> needs a <select> wrapper in this browser" );
+		ok( true, "<option> needs a <select> wrapper in this browser" );
+	}
+
+	strictEqual( result.selectOptions, 2, "append(): <option> markup still lands in a <select>" );
+	strictEqual( result.optionValue, "opt", "jQuery(): <option> attributes are kept" );
+	deepEqual( result.executed, [], "No sanitized <option>/<optgroup> payload is executed" );
+});

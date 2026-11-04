@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+	<title>Bundled jQuery 1.9.1 (src/sizzle/test/jquery.js): &lt;option&gt;/&lt;optgroup&gt; HTML isn't parsed inside a &lt;select&gt; wrapper (gh-4647)</title>
+	<!-- The jQuery 1.9.1 that ships as the Sizzle test fixture -->
+	<script src="../../../src/sizzle/test/jquery.js"></script>
+</head>
+<body>
+	<script>
+		// Sanitized markup that only becomes dangerous inside a <select> wrapper:
+		// the stray </select> closes the wrapper and the rest is re-parsed.
+		// "xss(#)" is swapped for the recorder and a per-payload index.
+		var templates = [
+				"<option><style></option></select><img src=url404 onerror=xss(#)></style>",
+				"<optgroup><style></optgroup></select><img src=url404 onerror=xss(#)></style>",
+				"<option><xmp></option></select><img src=url404 onerror=xss(#)></xmp>"
+			],
+			probe = document.createElement( "div" ),
+			result = {
+				version: jQuery.fn.jquery,
+				supportOption: jQuery.support.option,
+				hasParseHTML: !!jQuery.parseHTML,
+				payloads: [],
+				executed: []
+			},
+			container, methods, i, j, payload,
+			counter = 0;
+
+		// Support: IE <=9 only
+		// IE <=9 replaces <option> tags with their contents when inserted outside of
+		// the select element, so the select wrapper is still required there.
+		probe.innerHTML = "<option></option>";
+		result.optionParses = !!probe.lastChild;
+
+		function nodeNames( nodes ) {
+			var names = [],
+				k;
+
+			for ( k = 0; k < nodes.length; k++ ) {
+				names.push( nodes[ k ].nodeName.toLowerCase() );
+			}
+			return names.join( "," );
+		}
+
+		window.xss = function( index ) {
+			result.executed.push( result.payloads[ index ] );
+		};
+
+		// A stray </select> must not close a wrapper added by jQuery
+		result.jQueryNodes = nodeNames( jQuery( "<option>a</option></select><b>b</b>" ) );
+		result.htmlChildren = nodeNames( jQuery( "<div></div>" ).html( "<option>a</option></select><b>b</b>" ).children() );
+		result.appendChildren = nodeNames( jQuery( "<div></div>" ).append( "<optgroup label='g'></optgroup></select><b>b</b>" ).children() );
+		result.parseHTMLNodes = nodeNames( jQuery.parseHTML( "<optgroup label='g'></optgroup></select><b>b</b>" ) );
+
+		// <option> markup still works where it is meant to go
+		result.selectOptions = jQuery( "<select></select>" ).append( "<option>1</option><option>2</option>" ).children( "option" ).length;
+		result.optionValue = jQuery( "<option value='opt'>option</option>" ).val();
+
+		container = jQuery( "<div></div>" ).appendTo( document.body );
+		methods = [
+			[ "html", function( html ) {
+				jQuery( "<div></div>" ).appendTo( container ).html( html );
+			} ],
+			[ "append", function( html ) {
+				jQuery( "<div></div>" ).appendTo( container ).append( html );
+			} ],
+			[ "prepend", function( html ) {
+				jQuery( "<div></div>" ).appendTo( container ).prepend( html );
+			} ],
+			[ "before", function( html ) {
+				jQuery( "<div></div>" ).appendTo( container ).before( html );
+			} ],
+			[ "after", function( html ) {
+				jQuery( "<div></div>" ).appendTo( container ).after( html );
+			} ],
+			[ "jQuery", function( html ) {
+				jQuery( html );
+			} ],
+			[ "jQuery.parseHTML", function( html ) {
+				jQuery.parseHTML( html );
+			} ]
+		];
+
+		for ( i = 0; i < templates.length; i++ ) {
+			for ( j = 0; j < methods.length; j++ ) {
+				payload = templates[ i ].replace( "#", counter );
+				result.payloads.push( methods[ j ][ 0 ] + "( " + payload + " )" );
+				methods[ j ][ 1 ]( payload );
+				counter++;
+			}
+		}
+
+		// Give the url404 images time to fail and fire any injected onerror handler
+		setTimeout(function() {
+			window.parent.iframeCallback( result );
+		}, 1000 );
+	</script>
+</body>
+</html>
