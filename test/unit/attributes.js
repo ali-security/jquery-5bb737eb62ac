@@ -1473,3 +1473,34 @@ test( "Insignificant white space returned for $(option).val() (#14858)", functio
 	val = jQuery( "<option>  test  </option>" ).val();
 	equal( val.length, 4, "insignificant white-space returned for value" );
 });
+
+test( "non-lowercase boolean attribute getters should not crash (CVE-2016-10707)", function() {
+	expect( 9 );
+
+	var elem = jQuery( "<input disabled required autofocus type='checkbox'>" ).appendTo( "#qunit-fixture" );
+
+	jQuery.each( {
+		disabled: "DisAbled",
+		required: "requiRed",
+		autofocus: "AUTOFOCUS"
+	}, function( lowercased, original ) {
+		try {
+			strictEqual( elem.attr( original ), lowercased,
+				"The '" + original + "' attr() getter returns the lowercased name" );
+		} catch ( e ) {
+			ok( false, "The '" + original + "' attr() getter threw" );
+		}
+		try {
+			strictEqual( jQuery.find.attr( elem[ 0 ], original ), lowercased,
+				"The '" + original + "' Sizzle attribute getter returns the lowercased name" );
+		} catch ( e ) {
+			ok( false, "The '" + original + "' Sizzle attribute getter threw: " + e );
+		}
+		try {
+			strictEqual( elem.filter( "[" + original + "]" ).length, 1,
+				"The '" + original + "' attribute selector matches" );
+		} catch ( e ) {
+			ok( false, "The '" + original + "' attribute selector threw: " + e );
+		}
+	});
+});
