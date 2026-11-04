@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+	<title>Bundled jQuery 1.9.1 (src/sizzle/test/jquery.js): XHTML-style self-closing non-void tags are not expanded (CVE-2020-11022)</title>
+	<!-- The jQuery 1.9.1 that ships as the Sizzle test fixture -->
+	<script src="../../../src/sizzle/test/jquery.js"></script>
+</head>
+<body>
+	<script>
+		// Self-closed non-void tags whose expansion ("<x/>" -> "<x></x>") would make
+		// the markup parse differently than it does in the browser: text inside the
+		// raw text elements would break out of them and turn into live markup.
+		var inputs = [
+				"<div/><span class='sibling'/>",
+				"<style><style/><b>escaped</b>",
+				"<xmp><xmp/><b>escaped</b>",
+				"<title><title /><b>escaped</b>",
+				"<textarea><textarea/><b>escaped</b>",
+				"<iframe><iframe/><b>escaped</b>",
+				"<noframes><noframes/><b>escaped</b>",
+				"<noscript><noscript/><b>escaped</b>",
+				"<noscript/><b>escaped</b>"
+			],
+
+			// Thanks to Masato Kinugawa from Cure53 for providing the following test cases.
+			// "xss(#)" is swapped for the recorder and a per-payload index.
+			templates = [
+				"<img alt=\"<x\" title=\"/><img src=url404 onerror=xss(#)>\">",
+				"<img alt=\"\n<x\" title=\"/>\n<img src=url404 onerror=xss(#)>\">",
+				"<style><style/><img src=url404 onerror=xss(#)>",
+				"<xmp><xmp/><img src=url404 onerror=xss(#)>",
+				"<title><title /><img src=url404 onerror=xss(#)>",
+				"<iframe><iframe/><img src=url404 onerror=xss(#)>",
+				"<noframes><noframes/><img src=url404 onerror=xss(#)>",
+				"<noscript><noscript/><img src=url404 onerror=xss(#)>",
+				"<foo\" alt=\"\" title=\"/><img src=url404 onerror=xss(#)>\">",
+				"<img alt=\"<x\" title=\"\" src=\"/><img src=url404 onerror=xss(#)>\">",
+				"<noscript/><img src=url404 onerror=xss(#)>"
+			],
+			probe = document.createElement( "div" ),
+			result = {
+				version: jQuery.fn.jquery,
+				compared: 0,
+				mismatches: [],
+				payloads: [],
+				executed: []
+			},
+			container, parsers, methods, div, i, j, parsed, payload,
+			counter = 0;
+
+		window.xss = function( index ) {
+			result.executed.push( result.payloads[ index ] );
+		};
+
+		// "<div/><div/>" nests like it does in the browser instead of giving siblings
+		div = jQuery( "<div></div>" ).html( "<div/><div/>" );
+		result.htmlChildren = div.children().length;
+		result.htmlGrandchildren = div.children().children().length;
+
+		div = jQuery( "<div></div>" ).append( "<div/><div/>" );
+		result.appendChildren = div.children().length;
+		result.appendGrandchildren = div.children().children().length;
+
+		result.jQueryTopLevel = jQuery( "<div/><div/>" ).length;
+		result.parseHTMLTopLevel = jQuery.parseHTML( "<div/><div/>", document ).length;
+
+		// Explicitly closed and void tags keep working
+		result.explicitChildren = jQuery( "<div></div>" ).html( "<div></div><div></div>" ).children().length;
+		result.voidChildren = jQuery( "<div></div>" ).html( "<img/><hr/><br/>" ).children().length;
+		result.singleTag = jQuery( "<span/>" ).length === 1 && jQuery.nodeName( jQuery( "<span/>" )[ 0 ], "span" );
+
+		// jQuery must parse the markup the same way the browser does
+		parsers = [
+			[ "html", function( html ) {
+				return jQuery( "<div></div>" ).html( html ).html();
+			} ],
+			[ "append", function( html ) {
+				return jQuery( "<div></div>" ).append( html ).html();
+			} ],
+			[ "jQuery", function( html ) {
+				return jQuery( "<div></div>" ).append( jQuery( html ) ).html();
+			} ],
+			[ "jQuery.parseHTML", function( html ) {
+				return jQuery( "<div></div>" ).append( jQuery.parseHTML( html, document ) ).html();
+			} ]
+		];
+
+		for ( i = 0; i < inputs.length; i++ ) {
+			probe.innerHTML = inputs[ i ];
+			for ( j = 0; j < parsers.length; j++ ) {
+				parsed = parsers[ j ][ 1 ]( inputs[ i ] );
+				result.compared++;
+				if ( parsed !== probe.innerHTML ) {
+					result.mismatches.push( parsers[ j ][ 0 ] + "( " + inputs[ i ] + " ) gave " +
+						parsed + " instead of " + probe.innerHTML );
+				}
+			}
+		}
+
+		// Sanitized markup must not get unsanitized by any DOM manipulation method
+		container = jQuery( "<div></div>" ).appendTo( document.body );
+		methods = [
+			[ "html", function( html ) {
+				jQuery( "<div></div>" ).appendTo( container ).html( html );
+			} ],
+			[ "append", function( html ) {
+				jQuery( "<div></div>" ).appendTo( container ).append( html );
+			} ],
+			[ "prepend", function( html ) {
+				jQuery( "<div></div>" ).appendTo( container ).prepend( html );
+			} ],
+			[ "before", function( html ) {
+				jQuery( "<div></div>" ).appendTo( container ).before( html );
+			} ],
+			[ "after", function( html ) {
+				jQuery( "<div></div>" ).appendTo( container ).after( html );
+			} ],
+			[ "replaceWith", function( html ) {
+				jQuery( "<div></div>" ).appendTo( container ).replaceWith( html );
+			} ],
+			[ "jQuery", function( html ) {
+				jQuery( html ).appendTo( container );
+			} ],
+			[ "jQuery.parseHTML", function( html ) {
+				container.append( jQuery.parseHTML( html, document ) );
+			} ]
+		];
+
+		for ( i = 0; i < templates.length; i++ ) {
+			for ( j = 0; j < methods.length; j++ ) {
+				payload = templates[ i ].replace( "#", counter );
+				result.payloads.push( methods[ j ][ 0 ] + "( " + payload + " )" );
+				methods[ j ][ 1 ]( payload );
+				counter++;
+			}
+		}
+
+		// Give the url404 images time to fail and fire any injected onerror handler
+		setTimeout(function() {
+			window.parent.iframeCallback( result );
+		}, 1000 );
+	</script>
+</body>
+</html>
