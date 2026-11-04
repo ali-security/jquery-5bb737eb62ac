@@ -2489,7 +2489,8 @@ asyncTest( "Sanitized HTML with <option> doesn't get unsanitized (gh-4647)", 1, 
 	container.html( "<option><style></option></select><img src=url404 onerror=xss(0)></style>" );
 	container.append( "<optgroup><style></optgroup></select><img src=url404 onerror=xss(1)></style>" );
 	jQuery( "<option><style></option></select><img src=url404 onerror=xss(2)></style>" );
-	jQuery.parseHTML( "<option><style></option></select><img src=url404 onerror=xss(3)></style>" );
+	// Parse into the page document: in the default inert one an <img> never loads, so the payload could never run
+	jQuery.parseHTML( "<option><style></option></select><img src=url404 onerror=xss(3)></style>", document );
 
 	setTimeout(function() {
 		deepEqual( executed, [], "Insecure code wasn't executed" );
@@ -2563,7 +2564,8 @@ test( "jQuery.htmlPrefilter doesn't modify self-closing tags (CVE-2020-11022)", 
 			"append(): parsed the same as by the browser: " + input );
 		equal( jQuery( "<div></div>" ).append( jQuery( input ) ).html(), div.innerHTML,
 			"jQuery( html ): parsed the same as by the browser: " + input );
-		equal( jQuery( "<div></div>" ).append( jQuery.parseHTML( input ) ).html(), div.innerHTML,
+		// Parse into the page document: the default inert one has scripting off, so <noscript> content would parse as markup
+		equal( jQuery( "<div></div>" ).append( jQuery.parseHTML( input, document ) ).html(), div.innerHTML,
 			"jQuery.parseHTML(): parsed the same as by the browser: " + input );
 	}
 

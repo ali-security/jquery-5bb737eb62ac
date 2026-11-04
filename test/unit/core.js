@@ -1405,6 +1405,72 @@ test("jQuery.parseHTML", function() {
 	ok( jQuery.parseHTML("<#if><tr><p>This is a test.</p></tr><#/if>") || true, "Garbage input should not cause error" );
 });
 
+// Support: Safari 8 (jQuery.support.createHTMLDocument === false; the protection is off there)
+if ( jQuery.support.createHTMLDocument !== false ) {
+	asyncTest( "jQuery.parseHTML - inline event handlers are not executed (sonatype-2014-0026)", function() {
+		expect( 1 );
+
+		Globals.register( "parseHTMLError" );
+
+		jQuery.globalEval( "parseHTMLError = false;" );
+		jQuery.parseHTML( "<img src=x onerror='parseHTMLError = true'>" );
+
+		window.setTimeout(function() {
+			start();
+			equal( window.parseHTMLError, false, "onerror eventhandler has not been called." );
+		}, 2000 );
+	});
+
+	asyncTest( "jQuery.parseHTML( html, keepScripts ) - inline event handlers are not executed (sonatype-2014-0026)", function() {
+		expect( 2 );
+
+		Globals.register( "parseHTMLKeepScriptsError" );
+		Globals.register( "parseHTMLControl" );
+
+		jQuery.globalEval( "parseHTMLKeepScriptsError = false; parseHTMLControl = false;" );
+
+		// keepScripts as the second argument, as the third one and markup that goes through a wrapMap wrapper
+		jQuery.parseHTML( "<img src=x1 onerror='parseHTMLKeepScriptsError = true'>", true );
+		jQuery.parseHTML( "<img src=x2 onerror='parseHTMLKeepScriptsError = true'>", null, true );
+		jQuery.parseHTML( "<tr><td><img src=x3 onerror='parseHTMLKeepScriptsError = true'></td></tr>" );
+
+		// Control: with the page document as an explicit context the markup is parsed
+		// in that document (as jQuery( html ) does), so the handler does run there
+		jQuery.parseHTML( "<img src=x4 onerror='parseHTMLControl = true'>", document );
+
+		window.setTimeout(function() {
+			start();
+			equal( window.parseHTMLKeepScriptsError, false, "onerror eventhandler has not been called." );
+			equal( window.parseHTMLControl, true, "An explicit document context is still used (control)." );
+		}, 2000 );
+	});
+
+	testIframeWithCallback( "jQuery.parseHTML - inline event handlers are not executed - bundled jQuery 1.9.1 (src/sizzle/test/jquery.js) (sonatype-2014-0026)", "core/parseHTMLBundled.html", function( result ) {
+		expect( 10 );
+
+		strictEqual( result.version, "1.9.1", "src/sizzle/test/jquery.js is jQuery 1.9.1" );
+		strictEqual( result.hasParseHTML, true, "1.9.1 has jQuery.parseHTML" );
+		strictEqual( result.supportCreateHTMLDocument, true, "jQuery.support.createHTMLDocument" );
+		strictEqual( result.payloads, 6, "Every payload went through every context-less call" );
+		deepEqual( result.executed, [], "Context-less jQuery.parseHTML ran no inline event handler" );
+		strictEqual( result.controlFired, true,
+			"The same markup parsed with an explicit document context does run it (control)" );
+		ok( /\/test\.html$/.test( result.anchorHref ), "href is not lost after parsing anchor (gh-2965)" );
+		strictEqual( result.insertedText, "bold", "Parsed nodes can be inserted into the page" );
+		strictEqual( result.singleTag, "span", "Single tags are still parsed" );
+		strictEqual( result.explicitContextOwner, true, "An explicit context is still used" );
+	});
+}
+
+test( "jQuery.parseHTML(<a href>) - gh-2965", function() {
+	expect( 1 );
+
+	var html = "<a href='test.html'></a>",
+		href = jQuery.parseHTML( html )[ 0 ].href;
+
+	ok( /\/test\.html$/.test( href ), "href is not lost after parsing anchor" );
+});
+
 test("jQuery.parseJSON", function() {
 	expect( 20 );
 
